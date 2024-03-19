@@ -1,0 +1,78 @@
+from sklearn.cluster import KMeans
+from scipy.optimize import minimize_scalar
+import numpy as np
+import math
+from functools import lru_cache
+import pandas as pd
+# Read the CSV file
+df_loan = pd.read_csv('Task 3 and 4_Loan_Data.csv')
+
+# Check if FICO score is present in the dataset
+if 'fico_score' in df_loan.columns:
+    # Display basic statistics for FICO scores
+    fico_stats = df_loan['fico_score'].describe()
+else:
+    fico_stats = "FICO score column is not present in the dataset."
+
+fico_stats
+# Extract FICO scores and default labels from the dataset
+fico_scores = df_loan['fico_score'].values.reshape(-1, 1)
+default_labels = df_loan['default'].values
+
+
+# ===========================
+# MSE-Based Quantization
+# ===========================
+
+# Number of buckets (clusters) for K-means
+num_buckets_mse = 10
+
+# Apply K-means clustering for MSE-based bucketing
+kmeans = KMeans(n_clusters=num_buckets_mse, random_state=42)
+cluster_labels = kmeans.fit_predict(fico_scores)
+
+# Extract cluster centroids (representative FICO values for each bucket)
+cluster_centers = np.round(kmeans.cluster_centers_, 2).flatten()
+
+# Sort cluster centers
+sorted_cluster_centers_mse = np.sort(cluster_centers)
+
+# ===========================
+# Log-Likelihood Based Quantization
+# ===========================
+# Re-run the Log-Likelihood based quantization with the 1D fico_scores array
+# This time, make sure to use the 1D array in log_likelihood function as well
+
+# Function to calculate log-likelihood for a given set of bucket boundaries
+# Here, we make sure to use the 1D fico_scores array
+def log_likelihood(boundaries, fico_scores_1D, default_labels):
+    log_likelihood_val = 0
+    for i in range(len(boundaries) - 1):
+        lower_bound = boundaries[i]
+        upper_bound = boundaries[i + 1]
+        bucket_mask = (fico_scores_1D >= lower_bound) & (fico_scores_1D < upper_bound)
+        bucket_scores = fico_scores_1D[bucket_mask]
+        bucket_defaults = default_labels[bucket_mask]
+        ni = len(bucket_scores)
+        ki = np.sum(bucket_defaults)
+        if ni == 0:
+            continue
+        pi = ki / ni
+        log_likelihood_val += ki * math.log(max(pi, 1e-10)) + (ni - ki) * math.log(max(1 - pi, 1e-10))
+    return -log_likelihood_val
+
+# Memoized log-likelihood calculation function
+# Here, we make sure to use the 1D fico_scores array
+@lru_cache(maxsize=None)
+def memoized_log_likelihood(boundaries_tuple):
+    boundaries = np.array(boundaries_tuple)
+    return log_likelihood(boundaries, fico_scores_1D, default_labels)
+
+# Find optimal boundaries for sub-problems (0-600 and 600-850) using optimized function
+optimal_boundaries1_optimized = find_optimal_boundaries_optimized(fico_scores_1D, default_labels, num_buckets_sub, initial_boundaries1, sample_rate)
+optimal_boundaries2_optimized = find_optimal_boundaries_optimized(fico_scores_1D, default_labels, num_buckets_sub, initial_boundaries2, sample_rate)
+
+# Combine the boundaries for Log-Likelihood-based bucketing
+optimal_boundaries_log_likelihood = sorted(optimal_boundaries1_optimized + optimal_boundaries2_optimized)
+
+sorted_cluster_centers_mse, optimal_boundaries_log_likelihood

@@ -1,0 +1,145 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import roc_auc_score
+
+
+
+file_path = 'Task 3 and 4_Loan_Data.csv'
+df_loan = pd.read_csv(file_path)
+
+# Show the first few rows of the dataset and summary statistics to understand its structure
+df_loan.head(), df_loan.describe(), df_loan.info()
+
+# Summary statistics for the dataset
+df_loan.describe()
+# Check for missing values in each column
+df_loan.isnull().sum()
+# Plot histograms for numerical variables
+numerical_columns = ['credit_lines_outstanding', 'loan_amt_outstanding', 'total_debt_outstanding', 'income', 'years_employed', 'fico_score']
+
+plt.figure(figsize=(20, 15))
+for i, col in enumerate(numerical_columns, 1):
+    plt.subplot(2, 3, i)
+    sns.histplot(df_loan[col], bins=30, kde=True)
+    plt.title(f'Distribution of {col}')
+    plt.xlabel(col)
+    plt.ylabel('Frequency')
+
+plt.tight_layout()
+plt.show()
+
+#The correlation matrix
+corr_matrix = df_loan.corr()
+
+# Plot the heatmap
+plt.figure(figsize=(12, 8))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt='.2f')
+plt.title('Correlation Heatmap')
+plt.show()
+
+
+# Check the class distribution for 'default'
+class_dist = df_loan['default'].value_counts(normalize=True) * 100
+
+# Plot the class distribution
+plt.figure(figsize=(6, 4))
+sns.barplot(x=class_dist.index, y=class_dist.values)
+plt.title('Class Distribution for Default')
+plt.xlabel('Default')
+plt.ylabel('Percentage (%)')
+plt.xticks(ticks=[0, 1], labels=['No Default', 'Default'])
+for i, val in enumerate(class_dist):
+    plt.text(i, val - 2, f'{val:.2f}%', ha='center')
+plt.show()
+
+class_dist
+
+
+
+# Separate features and target variable
+X = df_loan.drop(['default', 'customer_id'], axis=1)  # Remove 'customer_id' here
+y = df_loan['default']
+
+# Split the data into training, validation, and test sets (70-15-15 ratio)
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp)
+
+# Initialize the StandardScaler
+scaler = StandardScaler()
+
+# Fit the scaler on the training data and transform both the training and validation data
+X_train_scaled = scaler.fit_transform(X_train)
+X_val_scaled = scaler.transform(X_val)
+X_test_scaled = scaler.transform(X_test)
+
+# Initialize the Logistic Regression model
+log_reg = LogisticRegression(random_state=42, class_weight='balanced')
+
+# Hyperparameter grid
+param_grid_log_reg = {'penalty': ['l1', 'l2', 'elasticnet'], 'C': [0.001, 0.01, 0.1, 1, 10]}
+
+# Initialize GridSearchCV
+grid_log_reg = GridSearchCV(log_reg, param_grid_log_reg, cv=5, scoring='roc_auc', n_jobs=-1)
+
+# Fit the model
+grid_log_reg.fit(X_train_scaled, y_train)
+
+# Best parameters and ROC-AUC score
+best_params_log_reg = grid_log_reg.best_params_
+best_score_log_reg = grid_log_reg.best_score_
+
+
+def calculate_expected_loss(loan_properties, model, scaler, recovery_rate=0.1):
+    """
+    Calculate the expected loss for a loan given its properties.
+    
+    Parameters:
+    - loan_properties (dict): A dictionary containing the properties of the loan.
+    - model (sklearn model): Trained machine learning model for default prediction.
+    - scaler (sklearn scaler): Fitted scaler object for feature scaling.
+    - recovery_rate (float): The rate at which the loan amount can be recovered if default occurs.
+    
+    Returns:
+    - float: The expected loss for the loan.
+    """
+    
+    # Extract loan amount
+    loan_amount = loan_properties.get('loan_amt_outstanding', 0)
+    
+    # Prepare feature vector
+    feature_names = ['credit_lines_outstanding', 'loan_amt_outstanding', 'total_debt_outstanding', 'income', 'years_employed', 'fico_score']
+    feature_values = np.array([loan_properties.get(name, 0) for name in feature_names]).reshape(1, -1)
+    
+    # Scale the features
+    feature_values_scaled = scaler.transform(feature_values)
+    
+    # Predict the probability of default (PD)
+    pd = model.predict_proba(feature_values_scaled)[:, 1][0]
+    
+    # Calculate Expected Loss
+    expected_loss = loan_amount * pd * (1 - recovery_rate)
+    
+    return expected_loss
+
+# Test the function with example loan properties
+example_loan_properties = {
+    'credit_lines_outstanding': 2,
+    'loan_amt_outstanding': 5000,
+    'total_debt_outstanding': 7000,
+    'income': 60000,
+    'years_employed': 5,
+    'fico_score': 650
+}
+
+# Use the best-performing model (Logistic Regression)
+best_model = grid_log_reg.best_estimator_
+
+# Calculate expected loss
+calculate_expected_loss(example_loan_properties, best_model, scaler)
+
